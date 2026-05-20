@@ -19,6 +19,25 @@ const pad = n => String(n).padStart(2, "0");
 const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const uniq = arr => [...new Set(arr)];
 
+const BEST_WEIGHTS = {
+  similar: 12,
+  hot5: -0.5,
+  hot10: 0,
+  hot30: 1.3,
+  hot50: 1.4,
+  all: 0.05,
+  cold: 10,
+  rebound: 10,
+  longCold: 2,
+  tooHot5: 6,
+  tooHot10: 10,
+  tooHotExtreme: 18,
+  tail: 5,
+  lowZone: 0.5,
+  midZone: 1.2,
+  highZone: 0.5
+};
+
 function parseNumbers(text) {
   return (text.match(/\b\d{1,2}\b/g) || [])
     .map(Number)
@@ -83,7 +102,7 @@ function zone(n) {
   return "high";
 }
 
-function scoreNumbers(history, w) {
+function scoreNumbers(history, w = BEST_WEIGHTS) {
   const latest = history[0];
 
   const recent5 = history.slice(0, 5);
@@ -153,7 +172,7 @@ function scoreNumbers(history, w) {
     .slice(0, 16);
 }
 
-function backtest(draws, weights) {
+function fastBacktest(draws) {
   const results = [];
   const hitMap = {};
 
@@ -161,7 +180,7 @@ function backtest(draws, weights) {
     hitMap[n] = { selected: 0, hit: 0 };
   }
 
-  const max = Math.min(40, draws.length - 20);
+  const max = Math.min(25, draws.length - 20);
 
   for (let i = 0; i < max; i++) {
     const target = draws[i];
@@ -169,10 +188,7 @@ function backtest(draws, weights) {
 
     if (history.length < 20) continue;
 
-    const pick = scoreNumbers(history, weights)
-      .slice(0, 6)
-      .map(x => x.number);
-
+    const pick = scoreNumbers(history).slice(0, 6).map(x => x.number);
     const hits = pick.filter(n => target.first.includes(n)).length;
 
     pick.forEach(n => {
@@ -210,77 +226,11 @@ function backtest(draws, weights) {
     hit3Rate: Math.round(hit3 * 100),
     hit4Rate: Math.round(hit4 * 100),
     accuracy: Math.round(accuracy),
+    reach90: Math.round(accuracy) >= 90,
+    reach99: Math.round(accuracy) >= 99,
     distribution,
     hitMap
   };
-}
-
-function generateCandidates() {
-  const candidates = [];
-
-  const similarSet = [8, 12];
-  const coldSet = [7, 10];
-  const reboundSet = [7, 10];
-  const tailSet = [3, 5];
-  const hot50Set = [1.1, 1.4];
-  const hot30Set = [1, 1.3];
-
-  for (const similar of similarSet) {
-    for (const cold of coldSet) {
-      for (const rebound of reboundSet) {
-        for (const tail of tailSet) {
-          for (const hot50 of hot50Set) {
-            for (const hot30 of hot30Set) {
-              candidates.push({
-                similar,
-                hot5: -0.5,
-                hot10: 0,
-                hot30,
-                hot50,
-                all: 0.05,
-                cold,
-                rebound,
-                longCold: 2,
-                tooHot5: 6,
-                tooHot10: 10,
-                tooHotExtreme: 18,
-                tail,
-                lowZone: 0.5,
-                midZone: 1.2,
-                highZone: 0.5
-              });
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return candidates;
-}
-
-function optimize(draws) {
-  const candidates = generateCandidates();
-
-  let best = null;
-
-  for (const weights of candidates) {
-    const test = backtest(draws, weights);
-
-    const rankScore =
-      test.accuracy * 2 +
-      test.averageHits * 20 +
-      test.hit3Rate * 1.5 +
-      test.hit4Rate * 3;
-
-    const item = { weights, test, rankScore };
-
-    if (!best || item.rankScore > best.rankScore) {
-      best = item;
-    }
-  }
-
-  return best;
 }
 
 function comboQuality(nums) {
@@ -313,9 +263,7 @@ function buildGroups(finalNumbers) {
   const groups = [
     p.slice(0, 6),
     [p[0], p[2], p[4], p[7], p[10], p[13]],
-    [p[1], p[3], p[5], p[8], p[11], p[14]],
-    [p[0], p[5], p[6], p[9], p[12], p[15]],
-    [p[2], p[3], p[7], p[10], p[13], p[15]]
+    [p[1], p[3], p[5], p[8], p[11], p[14]]
   ];
 
   return groups
@@ -329,9 +277,9 @@ function buildGroups(finalNumbers) {
 }
 
 function analyze(draws) {
-  const best = optimize(draws);
-  const top16Raw = scoreNumbers(draws, best.weights);
-  const hitMap = best.test.hitMap;
+  const test = fastBacktest(draws);
+  const top16Raw = scoreNumbers(draws);
+  const hitMap = test.hitMap;
 
   const finalNumbers = top16Raw
     .map(x => {
@@ -359,7 +307,7 @@ function analyze(draws) {
   });
 
   return {
-    mode: "Render快速盲測自動調參版",
+    mode: "秒開固定最佳權重盲測版",
     source: PILIO_URL,
     totalDraws: draws.length,
     latest: {
@@ -367,18 +315,7 @@ function analyze(draws) {
       second: pad(latest.second),
       raw: latest.raw
     },
-    backtest: {
-      total: best.test.total,
-      averageHits: best.test.averageHits,
-      hit1Rate: best.test.hit1Rate,
-      hit2Rate: best.test.hit2Rate,
-      hit3Rate: best.test.hit3Rate,
-      hit4Rate: best.test.hit4Rate,
-      accuracy: best.test.accuracy,
-      reach90: best.test.accuracy >= 90,
-      reach99: best.test.accuracy >= 99,
-      distribution: best.test.distribution
-    },
+    backtest: test,
     top6: finalNumbers.slice(0, 6),
     next6: finalNumbers.slice(6, 12),
     top16: finalNumbers,
@@ -393,11 +330,11 @@ function analyze(draws) {
       .sort((a, b) => b.score - a.score)
       .slice(0, 4),
     rules: {
-      bestWeights: best.weights,
-      testedModels: generateCandidates().length,
-      note: "快速版：每組權重盲測40期，Render免費版可跑。"
+      bestWeights: BEST_WEIGHTS,
+      testedModels: 1,
+      note: "秒開版：固定最佳權重，不再每次大量調參。"
     },
-    note: "盲測準確率是歷史推演結果，不代表未來保證中獎。"
+    note: "盲測結果是歷史推演參考，不代表未來保證中獎。"
   };
 }
 
@@ -415,7 +352,7 @@ app.get("/api/analyze", async (_, res) => {
     const draws = parsePilioDraws(html);
 
     if (draws.length < 30) {
-      throw new Error("歷史資料不足，無法盲測。");
+      throw new Error("歷史資料不足，無法分析。");
     }
 
     res.json(analyze(draws));
@@ -429,10 +366,10 @@ app.get("/api/analyze", async (_, res) => {
 app.get("/health", (_, res) => {
   res.json({
     ok: true,
-    mode: "Render快速盲測自動調參版"
+    mode: "秒開固定最佳權重盲測版"
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`Weili fast blind optimizer running on ${PORT}`);
+  console.log(`Weili instant analyzer running on ${PORT}`);
 });
