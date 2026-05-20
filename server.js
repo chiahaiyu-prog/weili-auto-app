@@ -13,7 +13,7 @@ app.get("/", (_, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-const PILIO_URL = "https://www.pilio.idv.tw/lto/list.asp";
+const PILIO_BASE = "https://www.pilio.idv.tw/lto/list.asp";
 
 const pad = n => String(n).padStart(2, "0");
 const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
@@ -25,7 +25,19 @@ function parseNumbers(text) {
     .filter(n => n >= 1 && n <= 38);
 }
 
-function parsePilioDraws(html) {
+async function fetchHtml(url) {
+  const res = await fetch(url, {
+    headers: {
+      "user-agent": "Mozilla/5.0 Lottery Analyzer"
+    }
+  });
+
+  if (!res.ok) throw new Error(`抓取失敗：${res.status}`);
+
+  return await res.text();
+}
+
+function parsePilioDrawsFromHtml(html) {
   const $ = cheerio.load(html);
   const rows = [];
 
@@ -54,14 +66,50 @@ function parsePilioDraws(html) {
     }
   });
 
+  return rows;
+}
+
+async function fetchManyDraws() {
+  const all = [];
+
+  // 先抓首頁
+  const html = await fetchHtml(PILIO_BASE);
+  all.push(...parsePilioDrawsFromHtml(html));
+
+  // 嘗試抓分頁，Pilio 有時候分頁格式會變，所以用多種候選格式
+  for (let p = 2; p <= 20; p++) {
+    const urls = [
+      `${PILIO_BASE}?indexpage=${p}`,
+      `${PILIO_BASE}?page=${p}`,
+      `${PILIO_BASE}?Page=${p}`,
+      `${PILIO_BASE}?p=${p}`
+    ];
+
+    for (const url of urls) {
+      try {
+        const h = await fetchHtml(url);
+        const rows = parsePilioDrawsFromHtml(h);
+
+        if (rows.length > 0) {
+          all.push(...rows);
+          break;
+        }
+      } catch (_) {}
+    }
+
+    if (all.length >= 300) break;
+  }
+
   const seen = new Set();
 
-  return rows.filter(d => {
-    const key = `${d.first.join("-")}|${d.second}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return all
+    .filter(d => {
+      const key = `${d.first.join("-")}|${d.second}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 300);
 }
 
 function countMap(draws) {
@@ -87,7 +135,6 @@ function gapMap(draws) {
 function tail(n) {
   return n % 10;
 }
-
 function rand(min, max) {
   return Math.random() * (max - min) + min;
 }
@@ -96,14 +143,15 @@ function buildRandomWeights() {
   return {
     hot10: rand(-5, 8),
     hot30: rand(-3, 6),
-    hot50: rand(-2, 4),
+    hot50: rand(-2, 5),
+    hot100: rand(-2, 4),
     coldGap: rand(-2, 8),
     allFreq: rand(-1, 2),
-    repeatPenalty: rand(-20, 0),
+    repeatPenalty: rand(-20, 2),
     tailBonus: rand(-5, 10),
-    overHotPenalty: rand(-20, 0),
+    overHotPenalty: rand(-25, 0),
     coldZeroBonus: rand(0, 15),
-    similarBonus: rand(0, 10)
+    similarBonus: rand(0, 12)
   };
 }
 
@@ -115,19 +163,21 @@ function similarDraws(history, latestSet) {
 
 function scoreNumbers(history, weights) {
   const latest = history[0];
+
   const recent10 = history.slice(0, 10);
   const recent30 = history.slice(0, 30);
   const recent50 = history.slice(0, 50);
+  const recent100 = history.slice(0, 100);
 
   const f10 = countMap(recent10);
   const f30 = countMap(recent30);
   const f50 = countMap(recent50);
+  const f100 = countMap(recent100);
   const all = countMap(history);
   const gap = gapMap(history);
 
   const latestSet = new Set(latest.first);
   const latestTails = latest.first.map(tail);
-
   const sim = similarDraws(history.slice(1), latestSet);
 
   const score = {};
@@ -141,6 +191,7 @@ function scoreNumbers(history, weights) {
       f10[n] * weights.hot10 +
       f30[n] * weights.hot30 +
       f50[n] * weights.hot50 +
+      f100[n] * weights.hot100 +
       gap[n] * weights.coldGap +
       all[n] * weights.allFreq +
       (latestSet.has(n) ? weights.repeatPenalty : 0) +
@@ -152,6 +203,7 @@ function scoreNumbers(history, weights) {
 
   return score;
 }
+
 function balancePick(scoreObj) {
   const list = range(1, 38)
     .map(n => ({ n, score: scoreObj[n] }))
@@ -219,22 +271,22 @@ function balancePick(scoreObj) {
 
   return pick.sort((a, b) => a - b);
 }
-
 function blindTest(draws, weights) {
   const results = [];
-  const max = Math.min(50, draws.length - 5);
+
+  // 歷史越多，最多測 120 期；資料少就自動縮小
+  const max = Math.min(120, draws.length - 30);
 
   for (let i = 0; i < max; i++) {
     const target = draws[i];
     const history = draws.slice(i + 1);
 
-    if (history.length < 5) continue;
+    if (history.length < 30) continue;
 
     const scoreObj = scoreNumbers(history, weights);
     const pick = balancePick(scoreObj);
 
     const hits = pick.filter(n => target.first.includes(n)).length;
-
     results.push(hits);
   }
 
@@ -242,9 +294,7 @@ function blindTest(draws, weights) {
   const avg = results.reduce((a, b) => a + b, 0) / total;
 
   const rate = x =>
-    Math.round(
-      (results.filter(h => h >= x).length / total) * 100
-    );
+    Math.round((results.filter(h => h >= x).length / total) * 100);
 
   const distribution = {};
   for (let i = 0; i <= 6; i++) {
@@ -266,19 +316,20 @@ function blindTest(draws, weights) {
 
 function modelScore(test) {
   return (
-    test.hit6Rate * 1000 +
-    test.hit5Rate * 500 +
-    test.hit4Rate * 150 +
-    test.hit3Rate * 40 +
-    test.hit2Rate * 10 +
-    test.averageHits
+    test.hit6Rate * 2000 +
+    test.hit5Rate * 1000 +
+    test.hit4Rate * 300 +
+    test.hit3Rate * 80 +
+    test.hit2Rate * 15 +
+    test.averageHits * 10
   );
 }
 
 function optimize(draws) {
   const models = [];
 
-  for (let i = 0; i < 1000; i++) {
+  // Render 免費版不要太重，先測 250 組
+  for (let i = 0; i < 250; i++) {
     const weights = buildRandomWeights();
     const test = blindTest(draws, weights);
 
@@ -290,9 +341,9 @@ function optimize(draws) {
   }
 
   models.sort((a, b) => b.score - a.score);
-
   return models[0];
 }
+
 function analyze(draws) {
   const best = optimize(draws);
 
@@ -318,7 +369,8 @@ function analyze(draws) {
     .slice(0, 4);
 
   return {
-    mode: "Final Optimizer 1000模型版",
+    mode: "300期歷史盲測 Optimizer",
+    totalDraws: draws.length,
     latest: {
       first: latest.first.map(pad),
       second: pad(latest.second)
@@ -337,25 +389,17 @@ function analyze(draws) {
     },
     secondArea,
     rules: {
-      testedModels: 1000,
-      bestWeights: best.weights
+      testedModels: 250,
+      bestWeights: best.weights,
+      note: "抓最多300期，盲測最多120期，優先拉高中3~6顆比例。"
     },
-    note: "1000模型盲測淘汰版：優先最大化中3~6顆，但不保證未來中獎。"
+    note: "歷史盲測只代表過去推演結果，不保證未來中獎。"
   };
 }
 
 app.get("/api/analyze", async (_, res) => {
   try {
-    const html = await fetch(PILIO_URL, {
-      headers: {
-        "user-agent": "Mozilla/5.0 Lottery Analyzer"
-      }
-    }).then(r => {
-      if (!r.ok) throw new Error(`Pilio fetch failed: ${r.status}`);
-      return r.text();
-    });
-
-    const draws = parsePilioDraws(html);
+    const draws = await fetchManyDraws();
 
     if (draws.length < 1) {
       throw new Error("抓不到威力彩資料。");
@@ -372,10 +416,10 @@ app.get("/api/analyze", async (_, res) => {
 app.get("/health", (_, res) => {
   res.json({
     ok: true,
-    mode: "Final Optimizer 1000模型版"
+    mode: "300期歷史盲測 Optimizer"
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`Weili final optimizer running on ${PORT}`);
+  console.log(`Weili 300 draws optimizer running on ${PORT}`);
 });
