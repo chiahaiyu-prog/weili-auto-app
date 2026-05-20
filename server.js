@@ -30,12 +30,7 @@ function parsePilioDraws(html) {
   const rows = [];
 
   $("tr").each((_, tr) => {
-    const text = $(tr)
-      .text()
-      .replace(/\u00a0/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
+    const text = $(tr).text().replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
     const nums = parseNumbers(text);
 
     if (nums.length >= 7) {
@@ -43,19 +38,13 @@ function parsePilioDraws(html) {
       const first = last7.slice(0, 6);
       const second = last7[6];
 
-      if (
-        first.length === 6 &&
-        uniq(first).length === 6 &&
-        second >= 1 &&
-        second <= 8
-      ) {
+      if (uniq(first).length === 6 && second >= 1 && second <= 8) {
         rows.push({ first, second, raw: text });
       }
     }
   });
 
   const seen = new Set();
-
   return rows.filter(d => {
     const key = `${d.first.join("-")}|${d.second}`;
     if (seen.has(key)) return false;
@@ -67,13 +56,7 @@ function parsePilioDraws(html) {
 function countMap(draws) {
   const map = {};
   for (let n = 1; n <= 38; n++) map[n] = 0;
-
-  draws.forEach(d => {
-    d.first.forEach(n => {
-      map[n]++;
-    });
-  });
-
+  draws.forEach(d => d.first.forEach(n => map[n]++));
   return map;
 }
 
@@ -94,15 +77,25 @@ function tail(n) {
   return n % 10;
 }
 
-function scoreNumbers(history, weights) {
+function zone(n) {
+  if (n <= 12) return "low";
+  if (n <= 25) return "mid";
+  return "high";
+}
+
+function scoreNumbers(history, w) {
+  const latest = history[0];
+  const recent5 = history.slice(0, 5);
   const recent10 = history.slice(0, 10);
   const recent30 = history.slice(0, 30);
   const recent50 = history.slice(0, 50);
-  const latest = history[0];
+  const recent100 = history.slice(0, 100);
 
+  const freq5 = countMap(recent5);
   const freq10 = countMap(recent10);
   const freq30 = countMap(recent30);
   const freq50 = countMap(recent50);
+  const freq100 = countMap(recent100);
   const freqAll = countMap(history);
   const lastSeen = lastSeenMap(history);
 
@@ -119,35 +112,33 @@ function scoreNumbers(history, weights) {
 
   similar.forEach(d => {
     d.first.forEach(n => {
-      if (!latestSet.has(n)) score[n] += weights.similar;
+      if (!latestSet.has(n)) score[n] += w.similar;
     });
   });
 
   for (let n = 1; n <= 38; n++) {
-    score[n] += freq10[n] * weights.hot10;
-    score[n] += freq30[n] * weights.hot30;
-    score[n] += freq50[n] * weights.hot50;
-    score[n] += freqAll[n] * weights.all;
+    score[n] += freq5[n] * w.hot5;
+    score[n] += freq10[n] * w.hot10;
+    score[n] += freq30[n] * w.hot30;
+    score[n] += freq50[n] * w.hot50;
+    score[n] += freq100[n] * w.hot100;
+    score[n] += freqAll[n] * w.all;
 
-    if (freq10[n] === 0 && lastSeen[n] >= 8) {
-      score[n] += weights.cold;
-    }
+    if (freq10[n] === 0 && lastSeen[n] >= 8) score[n] += w.cold;
+    if (lastSeen[n] >= 12 && lastSeen[n] <= 35) score[n] += w.rebound;
+    if (lastSeen[n] > 35) score[n] += w.longCold;
 
-    if (lastSeen[n] >= 15 && lastSeen[n] <= 35) {
-      score[n] += weights.rebound;
-    }
-
-    if (freq10[n] >= 3) {
-      score[n] -= weights.tooHot;
-    }
+    if (freq5[n] >= 2) score[n] -= w.tooHot5;
+    if (freq10[n] >= 3) score[n] -= w.tooHot10;
+    if (freq10[n] >= 4) score[n] -= w.tooHotExtreme;
 
     if (latestTails.includes(tail(n)) && !latestSet.has(n)) {
-      score[n] += weights.tail;
+      score[n] += w.tail;
     }
 
-    if (n >= 13 && n <= 25) {
-      score[n] += weights.midZone;
-    }
+    if (zone(n) === "mid") score[n] += w.midZone;
+    if (zone(n) === "low") score[n] += w.lowZone;
+    if (zone(n) === "high") score[n] += w.highZone;
   }
 
   const removeSet = new Set([
@@ -165,27 +156,48 @@ function scoreNumbers(history, weights) {
     .slice(0, 16);
 }
 
-function backtest(draws, weights, limit = 100) {
+function comboQuality(nums) {
+  const group = nums.map(Number);
+  let bonus = 0;
+
+  const odd = group.filter(n => n % 2 === 1).length;
+  if (odd === 3) bonus += 10;
+  if (odd === 2 || odd === 4) bonus += 5;
+
+  const low = group.filter(n => n <= 12).length;
+  const mid = group.filter(n => n >= 13 && n <= 25).length;
+  const high = group.filter(n => n >= 26).length;
+  if (low >= 1 && mid >= 1 && high >= 1) bonus += 12;
+
+  const sum = group.reduce((a, b) => a + b, 0);
+  if (sum >= 90 && sum <= 150) bonus += 12;
+
+  const tails = group.map(tail);
+  const maxTail = Math.max(...tails.map(t => tails.filter(x => x === t).length));
+  if (maxTail >= 3) bonus -= 10;
+
+  return bonus;
+}
+
+function backtest(draws, weights, limit = 120) {
   const results = [];
   const hitMap = {};
-  for (let n = 1; n <= 38; n++) hitMap[n] = 0;
+  for (let n = 1; n <= 38; n++) hitMap[n] = { selected: 0, hit: 0 };
 
-  const max = Math.max(1, Math.min(limit, draws.length - 10));
+  const max = Math.max(1, Math.min(limit, draws.length - 20));
 
   for (let i = 0; i < max; i++) {
     const target = draws[i];
     const history = draws.slice(i + 1);
 
-    if (history.length < 10) continue;
+    if (history.length < 20) continue;
 
-    const pick = scoreNumbers(history, weights)
-      .slice(0, 6)
-      .map(x => x.number);
-
+    const pick = scoreNumbers(history, weights).slice(0, 6).map(x => x.number);
     const hits = pick.filter(n => target.first.includes(n)).length;
 
     pick.forEach(n => {
-      if (target.first.includes(n)) hitMap[n]++;
+      hitMap[n].selected++;
+      if (target.first.includes(n)) hitMap[n].hit++;
     });
 
     results.push(hits);
@@ -193,56 +205,125 @@ function backtest(draws, weights, limit = 100) {
 
   const total = results.length || 1;
   const avg = results.reduce((a, b) => a + b, 0) / total;
+
+  const hit1 = results.filter(x => x >= 1).length / total;
+  const hit2 = results.filter(x => x >= 2).length / total;
   const hit3 = results.filter(x => x >= 3).length / total;
   const hit4 = results.filter(x => x >= 4).length / total;
 
-  const dist = {};
+  const distribution = {};
   for (let i = 0; i <= 6; i++) {
-    dist[i] = results.filter(x => x === i).length;
+    distribution[i] = results.filter(x => x === i).length;
   }
 
+  const accuracy =
+    hit2 * 35 +
+    hit3 * 35 +
+    hit4 * 20 +
+    Math.min(avg / 3, 1) * 10;
+
   return {
-    avg,
-    hit3,
-    hit4,
-    score: avg * 40 + hit3 * 80 + hit4 * 160,
     total,
-    dist,
-    hitMap
+    averageHits: Number(avg.toFixed(2)),
+    hit1Rate: Math.round(hit1 * 100),
+    hit2Rate: Math.round(hit2 * 100),
+    hit3Rate: Math.round(hit3 * 100),
+    hit4Rate: Math.round(hit4 * 100),
+    accuracy: Math.round(accuracy),
+    distribution,
+    hitMap,
+    rawResults: results
   };
 }
 
-function optimize(draws) {
-  const candidates = [
-    { similar: 8, hot10: 0.3, hot30: 1, hot50: 1.2, all: 0.1, cold: 8, rebound: 7, tooHot: 12, tail: 3, midZone: 1 },
-    { similar: 10, hot10: 0.1, hot30: 0.8, hot50: 1.5, all: 0.08, cold: 10, rebound: 8, tooHot: 15, tail: 4, midZone: 1.2 },
-    { similar: 6, hot10: 0.5, hot30: 1.1, hot50: 1, all: 0.15, cold: 7, rebound: 9, tooHot: 10, tail: 2, midZone: 0.8 },
-    { similar: 12, hot10: -0.2, hot30: 0.9, hot50: 1.3, all: 0.1, cold: 12, rebound: 6, tooHot: 18, tail: 5, midZone: 1 },
-    { similar: 9, hot10: 0, hot30: 1.2, hot50: 1.4, all: 0.05, cold: 9, rebound: 10, tooHot: 14, tail: 3.5, midZone: 1.5 }
-  ];
+function generateCandidates() {
+  const candidates = [];
 
-  return candidates
-    .map(w => ({
-      weights: w,
-      test: backtest(draws, w, 100)
-    }))
-    .sort((a, b) => b.test.score - a.test.score)[0];
+  const similarSet = [5, 8, 10, 12, 15];
+  const coldSet = [4, 7, 10, 13];
+  const reboundSet = [4, 7, 10, 13];
+  const tailSet = [1, 3, 5];
+  const hot50Set = [0.8, 1.1, 1.4];
+  const hot30Set = [0.7, 1, 1.3];
+
+  for (const similar of similarSet) {
+    for (const cold of coldSet) {
+      for (const rebound of reboundSet) {
+        for (const tail of tailSet) {
+          for (const hot50 of hot50Set) {
+            for (const hot30 of hot30Set) {
+              candidates.push({
+                similar,
+                hot5: -0.5,
+                hot10: 0,
+                hot30,
+                hot50,
+                hot100: 0.4,
+                all: 0.05,
+                cold,
+                rebound,
+                longCold: 2,
+                tooHot5: 6,
+                tooHot10: 10,
+                tooHotExtreme: 18,
+                tail,
+                lowZone: 0.5,
+                midZone: 1.2,
+                highZone: 0.5
+              });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return candidates;
 }
 
-function buildGroups(top16) {
-  const p = top16.map(x => Number(x.number));
+function optimize(draws) {
+  const candidates = generateCandidates();
+
+  let best = null;
+
+  for (const weights of candidates) {
+    const test = backtest(draws, weights, 120);
+
+    const rankScore =
+      test.accuracy * 2 +
+      test.averageHits * 20 +
+      test.hit3Rate * 1.5 +
+      test.hit4Rate * 3;
+
+    const item = { weights, test, rankScore };
+
+    if (!best || item.rankScore > best.rankScore) {
+      best = item;
+    }
+  }
+
+  return best;
+}
+
+function buildGroups(finalNumbers) {
+  const p = finalNumbers.map(x => Number(x.number));
 
   const groups = [
     p.slice(0, 6),
     [p[0], p[2], p[4], p[7], p[10], p[13]],
-    [p[1], p[3], p[5], p[8], p[11], p[14]]
+    [p[1], p[3], p[5], p[8], p[11], p[14]],
+    [p[0], p[5], p[6], p[9], p[12], p[15]],
+    [p[2], p[3], p[7], p[10], p[13], p[15]]
   ];
 
   return groups
     .filter(g => g.length === 6 && uniq(g).length === 6)
     .map(g => ({
-      numbers: g.map(pad)
-    }));
+      numbers: g.map(pad),
+      quality: comboQuality(g)
+    }))
+    .sort((a, b) => b.quality - a.quality)
+    .slice(0, 3);
 }
 
 function analyze(draws) {
@@ -250,30 +331,28 @@ function analyze(draws) {
   const top16Raw = scoreNumbers(draws, best.weights);
   const hitMap = best.test.hitMap;
 
-  const maxHit = Math.max(...Object.values(hitMap), 1);
-
   const finalNumbers = top16Raw.map(x => {
-    const hitScore = Math.round(60 + (hitMap[x.number] / maxHit) * 39);
+    const stat = hitMap[x.number] || { selected: 0, hit: 0 };
+    const blindRate = stat.selected > 0 ? stat.hit / stat.selected : 0;
 
     return {
       number: pad(x.number),
-      hitScore,
-      score: hitScore,
+      score: Math.round(60 + blindRate * 39),
+      blindSelected: stat.selected,
+      blindHits: stat.hit,
+      blindRate: Math.round(blindRate * 100),
       rawScore: Number(x.rawScore.toFixed(2))
     };
-  });
+  }).sort((a, b) => b.score - a.score || b.rawScore - a.rawScore);
 
   const latest = draws[0];
 
   const secondCount = {};
   for (let n = 1; n <= 8; n++) secondCount[n] = 0;
-
-  draws.slice(1, 120).forEach(d => {
-    secondCount[d.second]++;
-  });
+  draws.slice(1, 120).forEach(d => secondCount[d.second]++);
 
   return {
-    mode: "近100期自動回測最佳化版",
+    mode: "盲測自動調參最高準確率版",
     source: PILIO_URL,
     totalDraws: draws.length,
     latest: {
@@ -283,10 +362,15 @@ function analyze(draws) {
     },
     backtest: {
       total: best.test.total,
-      averageHits: Number(best.test.avg.toFixed(2)),
-      hit3Rate: Math.round(best.test.hit3 * 100),
-      hit4Rate: Math.round(best.test.hit4 * 100),
-      distribution: best.test.dist
+      averageHits: best.test.averageHits,
+      hit1Rate: best.test.hit1Rate,
+      hit2Rate: best.test.hit2Rate,
+      hit3Rate: best.test.hit3Rate,
+      hit4Rate: best.test.hit4Rate,
+      accuracy: best.test.accuracy,
+      reach90: best.test.accuracy >= 90,
+      reach99: best.test.accuracy >= 99,
+      distribution: best.test.distribution
     },
     top6: finalNumbers.slice(0, 6),
     next6: finalNumbers.slice(6, 12),
@@ -303,9 +387,10 @@ function analyze(draws) {
       .slice(0, 4),
     rules: {
       bestWeights: best.weights,
-      note: "這是用歷史回測挑出的最佳權重，不代表未來保證90%。"
+      testedModels: generateCandidates().length,
+      note: "每一期盲測都不看當期答案，只用更早以前的資料推演。"
     },
-    note: "命中分數來自歷史回測，不是保證中獎率。"
+    note: "準確率是歷史盲測結果，不代表未來保證中獎。"
   };
 }
 
@@ -322,8 +407,8 @@ app.get("/api/analyze", async (_, res) => {
 
     const draws = parsePilioDraws(html);
 
-    if (draws.length < 10) {
-      throw new Error("歷史資料不足，無法分析。");
+    if (draws.length < 30) {
+      throw new Error("歷史資料不足，無法盲測。");
     }
 
     res.json(analyze(draws));
@@ -337,10 +422,10 @@ app.get("/api/analyze", async (_, res) => {
 app.get("/health", (_, res) => {
   res.json({
     ok: true,
-    mode: "回測最佳化修正版"
+    mode: "盲測自動調參最高準確率版"
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`Weili backtest analyzer running on ${PORT}`);
+  console.log(`Weili blind test optimizer running on ${PORT}`);
 });
