@@ -1,61 +1,91 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>威力彩自動開法分析 App</title>
+  <title>威力彩自動分析</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <main class="app">
-    <section class="hero">
-      <div>
-        <p class="tag">AUTO WEILI ANALYZER</p>
-        <h1>威力彩自動開法分析</h1>
-        <p class="sub">不用輸入號碼，系統自動抓最新資料，分析歷史對應開法，刪除近期重複區，再顯示可能號碼。</p>
-      </div>
-      <button id="refreshBtn">重新分析</button>
+    <h1>威力彩自動分析</h1>
+    <p class="sub">自動抓最新開獎，每期重新分析</p>
+
+    <section class="card">
+      <h2>最新一期刪除</h2>
+      <div id="latest" class="nums">載入中...</div>
     </section>
 
-    <section class="card status">
-      <div>
-        <span>最新一期第一區</span>
-        <div id="latestFirst" class="balls"></div>
-      </div>
-      <div>
-        <span>第二區</span>
-        <div id="latestSecond" class="balls second"></div>
-      </div>
-    </section>
-
-    <section class="grid">
-      <div class="card">
-        <h2>最可能號碼 Top 16</h2>
-        <div id="topNumbers" class="balls big"></div>
-      </div>
-      <div class="card">
-        <h2>第二區參考</h2>
-        <div id="secondArea" class="balls second"></div>
-      </div>
+    <section class="card hot">
+      <h2>🔥 最兇 6 顆</h2>
+      <div id="top6" class="bigNums">載入中...</div>
     </section>
 
     <section class="card">
-      <h2>刪除規則</h2>
-      <div class="rules">
-        <div><b>灰色區｜近三期開過</b><p id="greyRemove"></p></div>
-        <div><b>太熱｜近十期開 3 次以上</b><p id="tooHotRemove"></p></div>
-        <div><b>最新一期刪除</b><p id="latestRemove"></p></div>
-      </div>
+      <h2>🔥 衝頭獎 3 組</h2>
+      <div id="groups">載入中...</div>
+    </section>
+
+    <section class="card">
+      <h2>第二區最強</h2>
+      <div id="second" class="bigNums">載入中...</div>
     </section>
 
     <section class="card">
       <h2>全部剩餘可能號碼</h2>
-      <div id="allNumbers" class="table"></div>
+      <div id="all" class="grid">載入中...</div>
     </section>
 
-    <p class="note">⚠️ 彩券沒有保證中獎，本 App 只是依歷史資料做參考分析。</p>
+    <p class="note">⚠️ 彩券沒有保證中獎，本 App 只是依歷史資料做參考。</p>
   </main>
 
-  <script src="app.js"></script>
+  <script>
+    async function loadData() {
+      try {
+        const res = await fetch("/api/analyze");
+        const data = await res.json();
+
+        if (data.error) throw new Error(data.error);
+
+        document.getElementById("latest").innerHTML =
+          data.latest.first.join("、") + "　第二區：" + data.latest.second;
+
+        const top6 = data.top16.slice(0, 6);
+        document.getElementById("top6").innerHTML =
+          top6.map(x => `<span>${x.number}</span>`).join("");
+
+        const pool = data.top16.map(x => x.number);
+
+        const groups = [
+          pool.slice(0, 6),
+          [pool[0], pool[2], pool[4], pool[6], pool[8], pool[10]].filter(Boolean),
+          [pool[1], pool[3], pool[5], pool[7], pool[9], pool[11]].filter(Boolean)
+        ];
+
+        document.getElementById("groups").innerHTML = groups.map((g, i) => `
+          <div class="group">
+            <b>第 ${i + 1} 組：</b>
+            ${g.join("、")}
+          </div>
+        `).join("");
+
+        document.getElementById("second").innerHTML =
+          data.secondArea.slice(0, 2).map(x => `<span>${x.number}</span>`).join("");
+
+        document.getElementById("all").innerHTML =
+          data.finalNumbers.map(x => `
+            <div class="numBox">
+              <b>${x.number}</b>
+              <small>分數 ${x.score}</small>
+            </div>
+          `).join("");
+
+      } catch (err) {
+        document.body.innerHTML = `<h2 style="color:white;padding:30px;">錯誤：${err.message}</h2>`;
+      }
+    }
+
+    loadData();
+  </script>
 </body>
 </html>
