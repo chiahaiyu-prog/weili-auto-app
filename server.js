@@ -8,323 +8,262 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static("."));
 
-app.get("/", (req, res) => {
-  res.sendFile(process.cwd() + "/index.html");
-});
+app.get("/", (_, res) => res.sendFile(process.cwd() + "/index.html"));
 
 const PORT = process.env.PORT || 3000;
 const PILIO_URL = "https://www.pilio.idv.tw/lto/list.asp";
 
 const pad = n => String(n).padStart(2, "0");
-const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
+const range = (a,b)=>Array.from({length:b-a+1},(_,i)=>a+i);
 const uniq = arr => [...new Set(arr)];
 
-function parseNumbers(text) {
-  return (text.match(/\b\d{1,2}\b/g) || [])
-    .map(Number)
-    .filter(n => n >= 1 && n <= 38);
+function parseNumbers(text){
+  return (text.match(/\b\d{1,2}\b/g)||[])
+    .map(Number).filter(n=>n>=1&&n<=38);
 }
 
-function parsePilioDraws(html) {
+function parsePilioDraws(html){
   const $ = cheerio.load(html);
   const rows = [];
 
-  $("tr").each((_, tr) => {
-    const text = $(tr).text().replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+  $("tr").each((_,tr)=>{
+    const text = $(tr).text().replace(/\u00a0/g," ").replace(/\s+/g," ").trim();
     const nums = parseNumbers(text);
-
-    if (nums.length >= 7) {
+    if(nums.length >= 7){
       const last7 = nums.slice(-7);
-      const first = last7.slice(0, 6);
+      const first = last7.slice(0,6);
       const second = last7[6];
-
-      if (uniq(first).length === 6 && second >= 1 && second <= 8) {
-        rows.push({ first, second, raw: text });
+      if(uniq(first).length===6 && second>=1 && second<=8){
+        rows.push({ first, second, raw:text });
       }
     }
   });
 
   const seen = new Set();
-  return rows.filter(d => {
-    const key = `${d.first.join("-")}|${d.second}`;
-    if (seen.has(key)) return false;
+  return rows.filter(d=>{
+    const key = d.first.join("-")+"|"+d.second;
+    if(seen.has(key)) return false;
     seen.add(key);
     return true;
   });
 }
 
-function countMap(draws) {
-  const map = {};
-  for (let n = 1; n <= 38; n++) map[n] = 0;
-  draws.forEach(d => d.first.forEach(n => map[n]++));
-  return map;
+function countMap(draws){
+  const m = {};
+  for(let n=1;n<=38;n++) m[n]=0;
+  draws.forEach(d=>d.first.forEach(n=>m[n]++));
+  return m;
 }
 
-function lastSeenMap(draws) {
-  const map = {};
-  for (let n = 1; n <= 38; n++) map[n] = 999;
-  draws.forEach((d, i) => {
-    d.first.forEach(n => {
-      if (map[n] === 999) map[n] = i;
+function lastSeenMap(draws){
+  const m = {};
+  for(let n=1;n<=38;n++) m[n]=999;
+  draws.forEach((d,i)=>{
+    d.first.forEach(n=>{
+      if(m[n]===999) m[n]=i;
     });
   });
-  return map;
+  return m;
 }
 
-function positionMap(draws) {
-  const pos = Array.from({ length: 6 }, () => ({}));
-  for (let i = 0; i < 6; i++) {
-    for (let n = 1; n <= 38; n++) pos[i][n] = 0;
-  }
+function tail(n){ return n % 10; }
 
-  draws.forEach(d => {
-    [...d.first].sort((a, b) => a - b).forEach((n, i) => {
-      pos[i][n]++;
-    });
-  });
+function scoreNumbers(history, weights){
+  const recent10 = history.slice(0,10);
+  const recent30 = history.slice(0,30);
+  const recent50 = history.slice(0,50);
+  const latest = history[0];
 
-  return pos;
-}
-
-function tail(n) {
-  return n % 10;
-}
-
-function zone(n) {
-  if (n <= 12) return "低區";
-  if (n <= 25) return "中區";
-  return "高區";
-}
-
-function comboScore(group, score) {
-  let total = group.reduce((s, n) => s + score[n], 0);
-
-  const odd = group.filter(n => n % 2 === 1).length;
-  const even = 6 - odd;
-  if (odd === 3 && even === 3) total += 10;
-  if (odd === 2 || odd === 4) total += 5;
-
-  const zones = {
-    low: group.filter(n => n <= 12).length,
-    mid: group.filter(n => n >= 13 && n <= 25).length,
-    high: group.filter(n => n >= 26).length
-  };
-
-  if (zones.low >= 1 && zones.mid >= 1 && zones.high >= 1) total += 12;
-
-  const sum = group.reduce((a, b) => a + b, 0);
-  if (sum >= 95 && sum <= 145) total += 12;
-
-  return Number(total.toFixed(2));
-}
-
-function buildGroups(finalNumbers, score) {
-  const pool = finalNumbers.slice(0, 18).map(x => Number(x.number));
-
-  const rawGroups = [
-    pool.slice(0, 6),
-    [pool[0], pool[2], pool[4], pool[7], pool[10], pool[13]],
-    [pool[1], pool[3], pool[5], pool[8], pool[11], pool[14]],
-    [pool[0], pool[5], pool[6], pool[9], pool[12], pool[15]],
-    [pool[2], pool[3], pool[7], pool[10], pool[13], pool[16]]
-  ];
-
-  return rawGroups
-    .filter(g => g.length === 6 && uniq(g).length === 6)
-    .map(g => ({
-      numbers: g.map(pad),
-      confidence: Math.min(99, Math.round(comboScore(g, score) / 4))
-    }))
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, 3);
-}
-
-function analyze(draws) {
-  const latest = draws[0];
-  const history = draws.slice(1);
-
-  const recent10 = draws.slice(0, 10);
-  const recent30 = draws.slice(0, 30);
-  const recent50 = draws.slice(0, 50);
-
-  const latestSet = new Set(latest.first);
-
-  const freqAll = countMap(history);
   const freq10 = countMap(recent10);
   const freq30 = countMap(recent30);
   const freq50 = countMap(recent50);
-  const lastSeen = lastSeenMap(draws);
-  const positions = positionMap(history);
+  const freqAll = countMap(history);
+  const lastSeen = lastSeenMap(history);
+  const latestSet = new Set(latest.first);
+  const latestTails = latest.first.map(tail);
 
-  const similar = history.filter(d =>
-    d.first.filter(n => latestSet.has(n)).length >= 2
+  const similar = history.slice(1).filter(d =>
+    d.first.filter(n=>latestSet.has(n)).length >= 2
   );
 
   const score = {};
-  for (let n = 1; n <= 38; n++) score[n] = 0;
+  for(let n=1;n<=38;n++) score[n]=0;
 
-  similar.forEach(d => {
-    d.first.forEach(n => {
-      if (!latestSet.has(n)) score[n] += 9;
+  similar.forEach(d=>{
+    d.first.forEach(n=>{
+      if(!latestSet.has(n)) score[n] += weights.similar;
     });
   });
 
-  for (let n = 1; n <= 38; n++) {
-    score[n] += freq50[n] * 1.2;
-    score[n] += freq30[n] * 1.0;
-    score[n] += freqAll[n] * 0.15;
+  for(let n=1;n<=38;n++){
+    score[n] += freq10[n] * weights.hot10;
+    score[n] += freq30[n] * weights.hot30;
+    score[n] += freq50[n] * weights.hot50;
+    score[n] += freqAll[n] * weights.all;
 
-    if (freq10[n] === 0 && lastSeen[n] >= 8) score[n] += 9;
-    if (lastSeen[n] >= 15 && lastSeen[n] <= 35) score[n] += 8;
-    if (lastSeen[n] > 35) score[n] += 3;
+    if(freq10[n]===0 && lastSeen[n]>=8) score[n] += weights.cold;
+    if(lastSeen[n]>=15 && lastSeen[n]<=35) score[n] += weights.rebound;
+    if(freq10[n]>=3) score[n] -= weights.tooHot;
+    if(latestTails.includes(tail(n)) && !latestSet.has(n)) score[n] += weights.tail;
 
-    if (freq10[n] >= 3) score[n] -= 8;
-    if (freq10[n] >= 4) score[n] -= 15;
-  }
-
-  const latestSorted = [...latest.first].sort((a, b) => a - b);
-
-  latestSorted.forEach((n, idx) => {
-    const posFreq = positions[idx] || {};
-    for (let cand = Math.max(1, n - 4); cand <= Math.min(38, n + 4); cand++) {
-      score[cand] += (posFreq[cand] || 0) * 0.45;
-    }
-  });
-
-  const latestTails = latest.first.map(tail);
-
-  for (let n = 1; n <= 38; n++) {
-    if (latestTails.includes(tail(n)) && !latestSet.has(n)) {
-      score[n] += 4;
-    }
-
-    if (n % 2 === 1) score[n] += 0.5;
-    if (zone(n) === "中區") score[n] += 1.2;
+    if(n>=13 && n<=25) score[n] += weights.midZone;
   }
 
   const removeSet = new Set([
     ...latest.first,
-    ...range(1, 38).filter(n => freq10[n] >= 4)
+    ...range(1,38).filter(n=>freq10[n]>=4)
   ]);
 
-  const rawList = range(1, 38)
-    .filter(n => !removeSet.has(n))
-    .map(n => ({
-      number: pad(n),
-      rawScore: score[n],
-      gap: lastSeen[n],
-      hot10: freq10[n],
-      hot30: freq30[n],
-      hot50: freq50[n]
-    }))
-    .sort((a, b) => b.rawScore - a.rawScore);
+  return range(1,38)
+    .filter(n=>!removeSet.has(n))
+    .map(n=>({ number:n, rawScore:score[n] }))
+    .sort((a,b)=>b.rawScore-a.rawScore)
+    .slice(0,16);
+}
 
-  const maxScore = rawList[0]?.rawScore || 1;
-  const minScore = rawList[rawList.length - 1]?.rawScore || 0;
+function backtest(draws, weights, limit=100){
+  const results = [];
+  const hitMap = {};
+  for(let n=1;n<=38;n++) hitMap[n]=0;
 
-  const finalNumbers = rawList.map(x => {
-    const confidence = Math.round(
-      60 + ((x.rawScore - minScore) / (maxScore - minScore || 1)) * 39
-    );
+  const max = Math.min(limit, draws.length - 60);
 
-    return {
-      number: x.number,
-      confidence,
-      score: confidence,
-      gap: x.gap,
-      hot10: x.hot10,
-      hot30: x.hot30,
-      hot50: x.hot50
-    };
-  });
+  for(let i=0;i<max;i++){
+    const target = draws[i];
+    const history = draws.slice(i+1);
+    if(history.length < 50) continue;
 
-  const top16 = finalNumbers.slice(0, 16);
-  const top6 = top16.slice(0, 6);
-  const next6 = top16.slice(6, 12);
-  const groups = buildGroups(finalNumbers, score);
+    const pick = scoreNumbers(history, weights).slice(0,6).map(x=>x.number);
+    const hits = pick.filter(n=>target.first.includes(n)).length;
 
-  const secondCount = {};
-  const secondRecent = {};
-  for (let n = 1; n <= 8; n++) {
-    secondCount[n] = 0;
-    secondRecent[n] = 0;
+    pick.forEach(n=>{
+      if(target.first.includes(n)) hitMap[n]++;
+    });
+
+    results.push(hits);
   }
 
-  history.forEach(d => secondCount[d.second]++);
-  recent10.forEach(d => secondRecent[d.second]++);
+  const total = results.length || 1;
+  const avg = results.reduce((a,b)=>a+b,0) / total;
+  const hit3 = results.filter(x=>x>=3).length / total;
+  const hit4 = results.filter(x=>x>=4).length / total;
 
-  const secondArea = range(1, 8)
-    .filter(n => n !== latest.second)
-    .map(n => {
-      const raw = secondCount[n] * 1.5 - secondRecent[n] * 2;
-      return {
-        number: pad(n),
-        confidence: Math.max(60, Math.min(99, Math.round(raw))),
-        score: Math.max(60, Math.min(99, Math.round(raw)))
-      };
-    })
-    .sort((a, b) => b.confidence - a.confidence)
-    .slice(0, 4);
+  const dist = {};
+  for(let i=0;i<=6;i++) dist[i]=results.filter(x=>x===i).length;
 
   return {
-    source: PILIO_URL,
-    mode: "Confidence 把握度版",
-    totalDraws: draws.length,
-    latest: {
-      first: latest.first.map(pad),
-      second: pad(latest.second),
-      raw: latest.raw
-    },
-    top6,
-    next6,
-    top16,
-    finalNumbers,
-    groups,
-    secondArea,
-    rules: {
-      similarDrawsUsed: similar.length,
-      latestRemove: latest.first.map(pad),
-      logic: [
-        "近10期熱度",
-        "近30期權重",
-        "近50期權重",
-        "冷號反彈",
-        "熱號降權",
-        "尾數規律",
-        "位置規律",
-        "奇偶比例",
-        "區間平衡",
-        "和值範圍",
-        "相似歷史開法",
-        "第二區交叉"
-      ]
-    },
-    note: "把握度是依歷史資料換算的信心分數，不代表保證中獎。"
+    avg,
+    hit3,
+    hit4,
+    score: avg*40 + hit3*80 + hit4*160,
+    total,
+    dist,
+    hitMap
   };
 }
 
-app.get("/api/analyze", async (req, res) => {
-  try {
-    const html = await fetch(PILIO_URL, {
-      headers: { "user-agent": "Mozilla/5.0 Lottery Analyzer" }
-    }).then(r => {
-      if (!r.ok) throw new Error(`Pilio fetch failed: ${r.status}`);
+function optimize(draws){
+  const candidates = [
+    {similar:8, hot10:.3, hot30:1, hot50:1.2, all:.1, cold:8, rebound:7, tooHot:12, tail:3, midZone:1},
+    {similar:10, hot10:.1, hot30:.8, hot50:1.5, all:.08, cold:10, rebound:8, tooHot:15, tail:4, midZone:1.2},
+    {similar:6, hot10:.5, hot30:1.1, hot50:1, all:.15, cold:7, rebound:9, tooHot:10, tail:2, midZone:.8},
+    {similar:12, hot10:-.2, hot30:.9, hot50:1.3, all:.1, cold:12, rebound:6, tooHot:18, tail:5, midZone:1},
+    {similar:9, hot10:0, hot30:1.2, hot50:1.4, all:.05, cold:9, rebound:10, tooHot:14, tail:3.5, midZone:1.5}
+  ];
+
+  return candidates
+    .map(w=>({ weights:w, test:backtest(draws,w,100) }))
+    .sort((a,b)=>b.test.score-a.test.score)[0];
+}
+
+function buildGroups(top16){
+  const p = top16.map(x=>x.number);
+  const groups = [
+    p.slice(0,6),
+    [p[0],p[2],p[4],p[7],p[10],p[13]],
+    [p[1],p[3],p[5],p[8],p[11],p[14]]
+  ];
+
+  return groups
+    .filter(g=>g.length===6 && uniq(g).length===6)
+    .map(g=>({ numbers:g.map(pad) }));
+}
+
+function analyze(draws){
+  const best = optimize(draws);
+  const top16Raw = scoreNumbers(draws, best.weights);
+  const hitMap = best.test.hitMap;
+
+  const maxHit = Math.max(...Object.values(hitMap),1);
+
+  const finalNumbers = top16Raw.map(x=>{
+    const hitScore = Math.round(60 + (hitMap[x.number] / maxHit) * 39);
+    return {
+      number: pad(x.number),
+      hitScore,
+      score: hitScore,
+      rawScore: Number(x.rawScore.toFixed(2))
+    };
+  });
+
+  const secondCount = {};
+  for(let n=1;n<=8;n++) secondCount[n]=0;
+  draws.slice(1,120).forEach(d=>secondCount[d.second]++);
+
+  const latest = draws[0];
+
+  return {
+    mode:"近100期自動回測最佳化版",
+    source:PILIO_URL,
+    totalDraws:draws.length,
+    latest:{
+      first:latest.first.map(pad),
+      second:pad(latest.second),
+      raw:latest.raw
+    },
+    backtest:{
+      total:best.test.total,
+      averageHits:Number(best.test.avg.toFixed(2)),
+      hit3Rate:Math.round(best.test.hit3*100),
+      hit4Rate:Math.round(best.test.hit4*100),
+      distribution:best.test.dist
+    },
+    top6:finalNumbers.slice(0,6),
+    next6:finalNumbers.slice(6,12),
+    top16:finalNumbers,
+    finalNumbers,
+    groups:buildGroups(finalNumbers),
+    secondArea:range(1,8)
+      .filter(n=>n!==latest.second)
+      .map(n=>({number:pad(n),score:secondCount[n]}))
+      .sort((a,b)=>b.score-a.score)
+      .slice(0,4),
+    rules:{
+      bestWeights:best.weights,
+      note:"這是用歷史100期回測挑出的最佳權重，不代表未來保證90%。"
+    },
+    note:"命中分數來自歷史回測，不是保證中獎率。"
+  };
+}
+
+app.get("/api/analyze", async (_,res)=>{
+  try{
+    const html = await fetch(PILIO_URL,{
+      headers:{"user-agent":"Mozilla/5.0 Lottery Analyzer"}
+    }).then(r=>{
+      if(!r.ok) throw new Error(`Pilio fetch failed: ${r.status}`);
       return r.text();
     });
 
     const draws = parsePilioDraws(html);
-    if (!draws.length) throw new Error("抓不到威力彩資料");
+    if(draws.length < 80) throw new Error("歷史資料不足，無法回測。");
 
     res.json(analyze(draws));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
+  }catch(err){
+    res.status(500).json({error:err.message});
   }
 });
 
-app.get("/health", (_, res) => {
-  res.json({ ok: true, mode: "Confidence 把握度版" });
-});
+app.get("/health",(_,res)=>res.json({ok:true,mode:"回測最佳化版"}));
 
-app.listen(PORT, () => {
-  console.log(`Weili Confidence analyzer running on port ${PORT}`);
-});
+app.listen(PORT,()=>console.log(`Weili backtest analyzer running on ${PORT}`));
