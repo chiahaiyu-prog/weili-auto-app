@@ -3,13 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>威力彩自動分析</title>
+  <title>威力彩神級分析</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <main class="app">
-    <h1>威力彩自動分析</h1>
-    <p class="sub">自動抓最新開獎，每期重新分析</p>
+    <section class="hero">
+      <h1>威力彩神級自動分析</h1>
+      <p class="sub">自動抓最新開獎・每期重新演算・歷史開法對應分析</p>
+    </section>
 
     <section class="card">
       <h2>最新一期刪除</h2>
@@ -41,48 +43,37 @@
 
   <script>
     async function loadData() {
-      try {
-        const res = await fetch("/api/analyze");
-        const data = await res.json();
+      const res = await fetch("/api/analyze");
+      const data = await res.json();
 
-        if (data.error) throw new Error(data.error);
+      document.getElementById("latest").innerHTML =
+        data.latest.first.join("、") + "　第二區：" + data.latest.second;
 
-        document.getElementById("latest").innerHTML =
-          data.latest.first.join("、") + "　第二區：" + data.latest.second;
+      const top6 = data.top16.slice(0, 6);
+      document.getElementById("top6").innerHTML =
+        top6.map(x => `<span>${x.number}</span>`).join("");
 
-        const top6 = data.top16.slice(0, 6);
-        document.getElementById("top6").innerHTML =
-          top6.map(x => `<span>${x.number}</span>`).join("");
+      const pool = data.top16.map(x => x.number);
+      const groups = [
+        pool.slice(0, 6),
+        [pool[0], pool[2], pool[4], pool[6], pool[8], pool[10]].filter(Boolean),
+        [pool[1], pool[3], pool[5], pool[7], pool[9], pool[11]].filter(Boolean)
+      ];
 
-        const pool = data.top16.map(x => x.number);
+      document.getElementById("groups").innerHTML = groups.map((g, i) => `
+        <div class="group"><b>第 ${i + 1} 組：</b>${g.join("、")}</div>
+      `).join("");
 
-        const groups = [
-          pool.slice(0, 6),
-          [pool[0], pool[2], pool[4], pool[6], pool[8], pool[10]].filter(Boolean),
-          [pool[1], pool[3], pool[5], pool[7], pool[9], pool[11]].filter(Boolean)
-        ];
+      document.getElementById("second").innerHTML =
+        data.secondArea.slice(0, 2).map(x => `<span>${x.number}</span>`).join("");
 
-        document.getElementById("groups").innerHTML = groups.map((g, i) => `
-          <div class="group">
-            <b>第 ${i + 1} 組：</b>
-            ${g.join("、")}
+      document.getElementById("all").innerHTML =
+        data.finalNumbers.map(x => `
+          <div class="numBox">
+            <b>${x.number}</b>
+            <small>分數 ${x.score}</small>
           </div>
         `).join("");
-
-        document.getElementById("second").innerHTML =
-          data.secondArea.slice(0, 2).map(x => `<span>${x.number}</span>`).join("");
-
-        document.getElementById("all").innerHTML =
-          data.finalNumbers.map(x => `
-            <div class="numBox">
-              <b>${x.number}</b>
-              <small>分數 ${x.score}</small>
-            </div>
-          `).join("");
-
-      } catch (err) {
-        document.body.innerHTML = `<h2 style="color:white;padding:30px;">錯誤：${err.message}</h2>`;
-      }
     }
 
     loadData();
