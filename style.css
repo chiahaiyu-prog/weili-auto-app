@@ -1,1 +1,121 @@
-*{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans TC","Microsoft JhengHei",sans-serif;background:radial-gradient(circle at top,#26345d,#090b13 55%,#03040a);color:#fff;min-height:100vh}.app{width:min(1100px,94vw);margin:auto;padding:34px 0}.hero{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:28px;border:1px solid rgba(255,255,255,.16);border-radius:28px;background:rgba(255,255,255,.08);box-shadow:0 20px 80px rgba(0,0,0,.35);backdrop-filter:blur(16px)}.tag{color:#8fd3ff;letter-spacing:3px;font-size:12px;font-weight:700}h1{font-size:42px;margin:8px 0 10px}.sub{color:#cdd6ee;line-height:1.7;max-width:720px}button{border:0;border-radius:18px;padding:16px 24px;background:linear-gradient(135deg,#7bdcff,#8f7bff);color:#06101c;font-weight:900;font-size:16px;box-shadow:0 0 28px rgba(123,220,255,.35)}.card{margin-top:22px;border:1px solid rgba(255,255,255,.14);border-radius:24px;background:rgba(255,255,255,.075);padding:24px;backdrop-filter:blur(16px)}.status{display:flex;justify-content:space-between;gap:16px}.grid{display:grid;grid-template-columns:2fr 1fr;gap:22px}.card h2{margin:0 0 18px;font-size:22px}.balls{display:flex;flex-wrap:wrap;gap:10px}.ball{width:44px;height:44px;border-radius:999px;display:grid;place-items:center;background:linear-gradient(135deg,#fff,#bcdcff);color:#071121;font-weight:900;box-shadow:0 8px 24px rgba(0,0,0,.25)}.big .ball{width:58px;height:58px;font-size:20px}.second .ball{background:linear-gradient(135deg,#ffd1d1,#ff5555);color:#fff}.rules{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.rules div{border-radius:18px;background:rgba(0,0,0,.22);padding:18px}.rules p{color:#d8e2ff;line-height:1.7}.table{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:10px}.item{padding:13px 12px;border-radius:16px;background:rgba(255,255,255,.1);text-align:center}.score{display:block;color:#8fd3ff;font-size:12px;margin-top:4px}.note{text-align:center;color:#aab4ce;margin:22px 0}@media(max-width:760px){.hero,.status{display:block}h1{font-size:32px}button{width:100%;margin-top:18px}.grid,.rules{grid-template-columns:1fr}.ball{width:42px;height:42px}.big .ball{width:50px;height:50px}}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial;
+  background:
+    radial-gradient(circle at top left,#7755ff55,transparent 35%),
+    radial-gradient(circle at top right,#00d5ff33,transparent 30%),
+    linear-gradient(180deg,#05060b,#090b14 45%,#02030a);
+  color:white;
+  min-height:100vh;
+}
+.app{
+  max-width:980px;
+  margin:auto;
+  padding:28px 18px 60px;
+}
+.hero{
+  padding:28px;
+  border-radius:32px;
+  background:linear-gradient(135deg,#ffffff1c,#ffffff08);
+  border:1px solid #ffffff24;
+  box-shadow:0 30px 80px #0008,inset 0 0 40px #ffffff08;
+  backdrop-filter:blur(18px);
+  margin-bottom:22px;
+}
+h1{
+  font-size:38px;
+  margin:0;
+  letter-spacing:.5px;
+  background:linear-gradient(90deg,#fff,#7ee7ff,#ffd36e);
+  -webkit-background-clip:text;
+  color:transparent;
+}
+.sub{
+  color:#b9c3da;
+  margin:10px 0 0;
+}
+.card{
+  margin:18px 0;
+  padding:24px;
+  border-radius:28px;
+  background:linear-gradient(145deg,#171a24dd,#0d1019dd);
+  border:1px solid #ffffff1f;
+  box-shadow:0 20px 55px #0007,inset 0 0 25px #ffffff06;
+}
+.card.hot{
+  background:
+    radial-gradient(circle at top,#ffd36e33,transparent 45%),
+    linear-gradient(145deg,#201805,#0d1019);
+  border:1px solid #ffd36e66;
+}
+h2{
+  margin:0 0 18px;
+  font-size:22px;
+}
+.nums{
+  font-size:24px;
+  color:#dbe7ff;
+  letter-spacing:2px;
+}
+.bigNums{
+  display:flex;
+  flex-wrap:wrap;
+  gap:14px;
+}
+.bigNums span{
+  min-width:76px;
+  height:76px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:24px;
+  font-size:30px;
+  font-weight:900;
+  background:linear-gradient(145deg,#2b3141,#141722);
+  border:1px solid #ffffff20;
+  box-shadow:inset 0 0 18px #ffffff10,0 12px 30px #0006;
+}
+.hot .bigNums span{
+  background:linear-gradient(145deg,#ffd36e,#c9821f);
+  color:#14110a;
+  box-shadow:0 0 35px #ffcc55aa;
+}
+.group{
+  padding:16px 18px;
+  margin:12px 0;
+  border-radius:18px;
+  background:#ffffff0d;
+  border:1px solid #ffffff18;
+  font-size:20px;
+  color:#eaf1ff;
+}
+.grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:14px;
+}
+.numBox{
+  padding:18px 8px;
+  text-align:center;
+  border-radius:22px;
+  background:linear-gradient(145deg,#2b2f3a,#151821);
+  border:1px solid #ffffff18;
+}
+.numBox b{
+  display:block;
+  font-size:28px;
+}
+.numBox small{
+  color:#8bd8ff;
+}
+.note{
+  color:#aeb7cc;
+  line-height:1.7;
+  padding:8px;
+}
+@media(max-width:520px){
+  h1{font-size:32px}
+  .grid{grid-template-columns:repeat(3,1fr)}
+  .bigNums span{min-width:68px;height:68px}
+}
