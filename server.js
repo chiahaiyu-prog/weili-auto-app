@@ -49,7 +49,12 @@ function parsePilioDraws(html) {
   const rows = [];
 
   $("tr").each((_, tr) => {
-    const text = $(tr).text().replace(/\u00a0/g, " ").replace(/\s+/g, " ").trim();
+    const text = $(tr)
+      .text()
+      .replace(/\u00a0/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
     const nums = parseNumbers(text);
 
     if (nums.length >= 7) {
@@ -57,13 +62,19 @@ function parsePilioDraws(html) {
       const first = last7.slice(0, 6);
       const second = last7[6];
 
-      if (first.length === 6 && uniq(first).length === 6 && second >= 1 && second <= 8) {
+      if (
+        first.length === 6 &&
+        uniq(first).length === 6 &&
+        second >= 1 &&
+        second <= 8
+      ) {
         rows.push({ first, second, raw: text });
       }
     }
   });
 
   const seen = new Set();
+
   return rows.filter(d => {
     const key = `${d.first.join("-")}|${d.second}`;
     if (seen.has(key)) return false;
@@ -75,7 +86,13 @@ function parsePilioDraws(html) {
 function countMap(draws) {
   const map = {};
   for (let n = 1; n <= 38; n++) map[n] = 0;
-  draws.forEach(d => d.first.forEach(n => map[n]++));
+
+  draws.forEach(d => {
+    d.first.forEach(n => {
+      map[n]++;
+    });
+  });
+
   return map;
 }
 
@@ -171,7 +188,6 @@ function scoreNumbers(history, w = BEST_WEIGHTS) {
     .sort((a, b) => b.rawScore - a.rawScore)
     .slice(0, 16);
 }
-
 function fastBacktest(draws) {
   const results = [];
   const hitMap = {};
@@ -180,15 +196,18 @@ function fastBacktest(draws) {
     hitMap[n] = { selected: 0, hit: 0 };
   }
 
-  const max = Math.min(25, draws.length - 20);
+  const max = Math.min(25, Math.max(1, draws.length - 1));
 
   for (let i = 0; i < max; i++) {
     const target = draws[i];
     const history = draws.slice(i + 1);
 
-    if (history.length < 20) continue;
+    if (history.length < 1) continue;
 
-    const pick = scoreNumbers(history).slice(0, 6).map(x => x.number);
+    const pick = scoreNumbers(history)
+      .slice(0, 6)
+      .map(x => x.number);
+
     const hits = pick.filter(n => target.first.includes(n)).length;
 
     pick.forEach(n => {
@@ -251,7 +270,10 @@ function comboQuality(nums) {
   if (sum >= 90 && sum <= 150) bonus += 12;
 
   const tails = group.map(tail);
-  const maxTail = Math.max(...tails.map(t => tails.filter(x => x === t).length));
+  const maxTail = Math.max(
+    ...tails.map(t => tails.filter(x => x === t).length)
+  );
+
   if (maxTail >= 3) bonus -= 10;
 
   return bonus;
@@ -307,7 +329,7 @@ function analyze(draws) {
   });
 
   return {
-    mode: "秒開固定最佳權重盲測版",
+    mode: "Final 秒開盲測分析版",
     source: PILIO_URL,
     totalDraws: draws.length,
     latest: {
@@ -332,9 +354,9 @@ function analyze(draws) {
     rules: {
       bestWeights: BEST_WEIGHTS,
       testedModels: 1,
-      note: "秒開版：固定最佳權重，不再每次大量調參。"
+      note: "Final 版：不擋歷史資料數量，Render 免費版可跑。"
     },
-    note: "盲測結果是歷史推演參考，不代表未來保證中獎。"
+    note: "盲測分數是歷史推演參考，不代表未來保證中獎。"
   };
 }
 
@@ -351,8 +373,8 @@ app.get("/api/analyze", async (_, res) => {
 
     const draws = parsePilioDraws(html);
 
-    if (draws.length < 30) {
-      throw new Error("歷史資料不足，無法分析。");
+    if (draws.length < 1) {
+      throw new Error("抓不到威力彩資料。");
     }
 
     res.json(analyze(draws));
@@ -366,10 +388,10 @@ app.get("/api/analyze", async (_, res) => {
 app.get("/health", (_, res) => {
   res.json({
     ok: true,
-    mode: "秒開固定最佳權重盲測版"
+    mode: "Final 秒開盲測分析版"
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`Weili instant analyzer running on ${PORT}`);
+  console.log(`Weili final instant analyzer running on ${PORT}`);
 });
