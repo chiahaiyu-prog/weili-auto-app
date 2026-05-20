@@ -19,25 +19,6 @@ const pad = n => String(n).padStart(2, "0");
 const range = (a, b) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const uniq = arr => [...new Set(arr)];
 
-const BEST_WEIGHTS = {
-  similar: 12,
-  hot5: -0.5,
-  hot10: 0,
-  hot30: 1.3,
-  hot50: 1.4,
-  all: 0.05,
-  cold: 10,
-  rebound: 10,
-  longCold: 2,
-  tooHot5: 6,
-  tooHot10: 10,
-  tooHotExtreme: 18,
-  tail: 5,
-  lowZone: 0.5,
-  midZone: 1.2,
-  highZone: 0.5
-};
-
 function parseNumbers(text) {
   return (text.match(/\b\d{1,2}\b/g) || [])
     .map(Number)
@@ -96,19 +77,6 @@ function countMap(draws) {
   return map;
 }
 
-function lastSeenMap(draws) {
-  const map = {};
-  for (let n = 1; n <= 38; n++) map[n] = 999;
-
-  draws.forEach((d, i) => {
-    d.first.forEach(n => {
-      if (map[n] === 999) map[n] = i;
-    });
-  });
-
-  return map;
-}
-
 function tail(n) {
   return n % 10;
 }
@@ -119,107 +87,99 @@ function zone(n) {
   return "high";
 }
 
-function scoreNumbers(history, w = BEST_WEIGHTS) {
-  const latest = history[0];
+function buildBestForm(history) {
+  const freq = countMap(history);
 
-  const recent5 = history.slice(0, 5);
-  const recent10 = history.slice(0, 10);
-  const recent30 = history.slice(0, 30);
-  const recent50 = history.slice(0, 50);
+  const low = range(1, 12)
+    .map(n => ({ n, f: freq[n] }))
+    .sort((a, b) => b.f - a.f);
 
-  const freq5 = countMap(recent5);
-  const freq10 = countMap(recent10);
-  const freq30 = countMap(recent30);
-  const freq50 = countMap(recent50);
-  const freqAll = countMap(history);
-  const lastSeen = lastSeenMap(history);
+  const mid = range(13, 25)
+    .map(n => ({ n, f: freq[n] }))
+    .sort((a, b) => b.f - a.f);
 
-  const latestSet = new Set(latest.first);
-  const latestTails = latest.first.map(tail);
+  const high = range(26, 38)
+    .map(n => ({ n, f: freq[n] }))
+    .sort((a, b) => b.f - a.f);
 
-  const similar = history.slice(1).filter(d => {
-    return d.first.filter(n => latestSet.has(n)).length >= 2;
-  });
+  // 最強形式：
+  // 低區 2顆、中區2顆、高區2顆
+  let pick = [
+    low[0].n,
+    low[1].n,
+    mid[0].n,
+    mid[1].n,
+    high[0].n,
+    high[1].n
+  ];
 
-  const score = {};
-  for (let n = 1; n <= 38; n++) score[n] = 0;
+  // 奇偶平衡調整（盡量3單3雙）
+  let odd = pick.filter(n => n % 2 === 1).length;
 
-  similar.forEach(d => {
-    d.first.forEach(n => {
-      if (!latestSet.has(n)) score[n] += w.similar;
-    });
-  });
+  if (odd < 2 || odd > 4) {
+    const all = [...low.slice(0,4), ...mid.slice(0,4), ...high.slice(0,4)]
+      .map(x => x.n)
+      .filter(n => !pick.includes(n));
 
-  for (let n = 1; n <= 38; n++) {
-    score[n] += freq5[n] * w.hot5;
-    score[n] += freq10[n] * w.hot10;
-    score[n] += freq30[n] * w.hot30;
-    score[n] += freq50[n] * w.hot50;
-    score[n] += freqAll[n] * w.all;
-
-    if (freq10[n] === 0 && lastSeen[n] >= 8) score[n] += w.cold;
-    if (lastSeen[n] >= 12 && lastSeen[n] <= 35) score[n] += w.rebound;
-    if (lastSeen[n] > 35) score[n] += w.longCold;
-
-    if (freq5[n] >= 2) score[n] -= w.tooHot5;
-    if (freq10[n] >= 3) score[n] -= w.tooHot10;
-    if (freq10[n] >= 4) score[n] -= w.tooHotExtreme;
-
-    if (latestTails.includes(tail(n)) && !latestSet.has(n)) {
-      score[n] += w.tail;
+    for (const n of all) {
+      for (let i = 0; i < pick.length; i++) {
+        const test = [...pick];
+        test[i] = n;
+        const o = test.filter(x => x % 2 === 1).length;
+        if (o >= 2 && o <= 4) {
+          pick = test;
+          odd = o;
+          break;
+        }
+      }
+      if (odd >= 2 && odd <= 4) break;
     }
-
-    if (zone(n) === "low") score[n] += w.lowZone;
-    if (zone(n) === "mid") score[n] += w.midZone;
-    if (zone(n) === "high") score[n] += w.highZone;
   }
 
-  const removeSet = new Set([
-    ...latest.first,
-    ...range(1, 38).filter(n => freq10[n] >= 4)
-  ]);
+  // 和值修正（90~150）
+  let sum = pick.reduce((a,b)=>a+b,0);
 
-  return range(1, 38)
-    .filter(n => !removeSet.has(n))
-    .map(n => ({
-      number: n,
-      rawScore: score[n]
-    }))
-    .sort((a, b) => b.rawScore - a.rawScore)
-    .slice(0, 16);
+  if (sum < 90 || sum > 150) {
+    const all = range(1,38)
+      .map(n => ({ n, f: freq[n] }))
+      .sort((a,b)=>b.f-a.f);
+
+    for (const cand of all) {
+      for (let i=0;i<pick.length;i++) {
+        const test = [...pick];
+        test[i] = cand.n;
+        const s = test.reduce((a,b)=>a+b,0);
+
+        if (s >= 90 && s <= 150 && uniq(test).length === 6) {
+          pick = test;
+          sum = s;
+          break;
+        }
+      }
+      if (sum >= 90 && sum <= 150) break;
+    }
+  }
+
+  return uniq(pick).sort((a,b)=>a-b);
 }
-function fastBacktest(draws) {
+function blindTest(draws) {
   const results = [];
-  const hitMap = {};
-
-  for (let n = 1; n <= 38; n++) {
-    hitMap[n] = { selected: 0, hit: 0 };
-  }
-
-  const max = Math.min(25, Math.max(1, draws.length - 1));
+  const max = Math.min(50, draws.length - 5);
 
   for (let i = 0; i < max; i++) {
     const target = draws[i];
     const history = draws.slice(i + 1);
 
-    if (history.length < 1) continue;
+    if (history.length < 5) continue;
 
-    const pick = scoreNumbers(history)
-      .slice(0, 6)
-      .map(x => x.number);
-
+    const pick = buildBestForm(history);
     const hits = pick.filter(n => target.first.includes(n)).length;
-
-    pick.forEach(n => {
-      hitMap[n].selected++;
-      if (target.first.includes(n)) hitMap[n].hit++;
-    });
 
     results.push(hits);
   }
 
   const total = results.length || 1;
-  const avg = results.reduce((a, b) => a + b, 0) / total;
+  const avg = results.reduce((a,b)=>a+b,0) / total;
 
   const hit1 = results.filter(x => x >= 1).length / total;
   const hit2 = results.filter(x => x >= 2).length / total;
@@ -231,12 +191,6 @@ function fastBacktest(draws) {
     distribution[i] = results.filter(x => x === i).length;
   }
 
-  const accuracy =
-    hit2 * 35 +
-    hit3 * 35 +
-    hit4 * 20 +
-    Math.min(avg / 3, 1) * 10;
-
   return {
     total,
     averageHits: Number(avg.toFixed(2)),
@@ -244,119 +198,51 @@ function fastBacktest(draws) {
     hit2Rate: Math.round(hit2 * 100),
     hit3Rate: Math.round(hit3 * 100),
     hit4Rate: Math.round(hit4 * 100),
-    accuracy: Math.round(accuracy),
-    reach90: Math.round(accuracy) >= 90,
-    reach99: Math.round(accuracy) >= 99,
-    distribution,
-    hitMap
+    distribution
   };
 }
 
-function comboQuality(nums) {
-  const group = nums.map(Number);
-  let bonus = 0;
-
-  const odd = group.filter(n => n % 2 === 1).length;
-  if (odd === 3) bonus += 10;
-  if (odd === 2 || odd === 4) bonus += 5;
-
-  const low = group.filter(n => n <= 12).length;
-  const mid = group.filter(n => n >= 13 && n <= 25).length;
-  const high = group.filter(n => n >= 26).length;
-
-  if (low >= 1 && mid >= 1 && high >= 1) bonus += 12;
-
-  const sum = group.reduce((a, b) => a + b, 0);
-  if (sum >= 90 && sum <= 150) bonus += 12;
-
-  const tails = group.map(tail);
-  const maxTail = Math.max(
-    ...tails.map(t => tails.filter(x => x === t).length)
-  );
-
-  if (maxTail >= 3) bonus -= 10;
-
-  return bonus;
-}
-
-function buildGroups(finalNumbers) {
-  const p = finalNumbers.map(x => Number(x.number));
-
-  const groups = [
-    p.slice(0, 6),
-    [p[0], p[2], p[4], p[7], p[10], p[13]],
-    [p[1], p[3], p[5], p[8], p[11], p[14]]
-  ];
-
-  return groups
-    .filter(g => g.length === 6 && uniq(g).length === 6)
-    .map(g => ({
-      numbers: g.map(pad),
-      quality: comboQuality(g)
-    }))
-    .sort((a, b) => b.quality - a.quality)
-    .slice(0, 3);
-}
-
 function analyze(draws) {
-  const test = fastBacktest(draws);
-  const top16Raw = scoreNumbers(draws);
-  const hitMap = test.hitMap;
-
-  const finalNumbers = top16Raw
-    .map(x => {
-      const stat = hitMap[x.number] || { selected: 0, hit: 0 };
-      const blindRate = stat.selected > 0 ? stat.hit / stat.selected : 0;
-
-      return {
-        number: pad(x.number),
-        score: Math.round(60 + blindRate * 39),
-        blindSelected: stat.selected,
-        blindHits: stat.hit,
-        blindRate: Math.round(blindRate * 100),
-        rawScore: Number(x.rawScore.toFixed(2))
-      };
-    })
-    .sort((a, b) => b.score - a.score || b.rawScore - a.rawScore);
+  const test = blindTest(draws);
+  const finalNumbers = buildBestForm(draws);
 
   const latest = draws[0];
 
   const secondCount = {};
   for (let n = 1; n <= 8; n++) secondCount[n] = 0;
 
-  draws.slice(1, 80).forEach(d => {
+  draws.slice(1).forEach(d => {
     secondCount[d.second]++;
   });
 
+  const secondArea = range(1, 8)
+    .filter(n => n !== latest.second)
+    .map(n => ({
+      number: pad(n),
+      score: secondCount[n]
+    }))
+    .sort((a,b)=>b.score-a.score)
+    .slice(0,4);
+
   return {
-    mode: "Final 秒開盲測分析版",
-    source: PILIO_URL,
-    totalDraws: draws.length,
+    mode: "最強形式固定模型",
     latest: {
       first: latest.first.map(pad),
-      second: pad(latest.second),
-      raw: latest.raw
+      second: pad(latest.second)
+    },
+    form: {
+      numbers: finalNumbers.map(pad),
+      oddEven:
+        `${finalNumbers.filter(n=>n%2===1).length}單` +
+        `${finalNumbers.filter(n=>n%2===0).length}雙`,
+      sum: finalNumbers.reduce((a,b)=>a+b,0),
+      low: finalNumbers.filter(n=>n<=12).length,
+      mid: finalNumbers.filter(n=>n>=13 && n<=25).length,
+      high: finalNumbers.filter(n=>n>=26).length
     },
     backtest: test,
-    top6: finalNumbers.slice(0, 6),
-    next6: finalNumbers.slice(6, 12),
-    top16: finalNumbers,
-    finalNumbers,
-    groups: buildGroups(finalNumbers),
-    secondArea: range(1, 8)
-      .filter(n => n !== latest.second)
-      .map(n => ({
-        number: pad(n),
-        score: secondCount[n]
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 4),
-    rules: {
-      bestWeights: BEST_WEIGHTS,
-      testedModels: 1,
-      note: "Final 版：不擋歷史資料數量，Render 免費版可跑。"
-    },
-    note: "盲測分數是歷史推演參考，不代表未來保證中獎。"
+    secondArea,
+    note: "歷史盲測形式模型，不代表未來保證中獎。"
   };
 }
 
@@ -388,10 +274,10 @@ app.get("/api/analyze", async (_, res) => {
 app.get("/health", (_, res) => {
   res.json({
     ok: true,
-    mode: "Final 秒開盲測分析版"
+    mode: "最強形式固定模型"
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`Weili final instant analyzer running on ${PORT}`);
+  console.log(`Weili strongest form analyzer running on ${PORT}`);
 });
