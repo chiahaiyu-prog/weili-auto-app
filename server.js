@@ -8,7 +8,9 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static("."));
 
-app.get("/", (_, res) => res.sendFile(process.cwd() + "/index.html"));
+app.get("/", (_, res) => {
+  res.sendFile(process.cwd() + "/index.html");
+});
 
 const PORT = process.env.PORT || 3000;
 const PILIO_URL = "https://www.pilio.idv.tw/lto/list.asp";
@@ -131,7 +133,9 @@ function scoreNumbers(history, weights) {
   const score = {};
 
   for (let n = 1; n <= 38; n++) {
-    const simCount = sim.reduce((s, d) => s + (d.first.includes(n) ? 1 : 0), 0);
+    const simCount = sim.reduce((s, d) => {
+      return s + (d.first.includes(n) ? 1 : 0);
+    }, 0);
 
     score[n] =
       f10[n] * weights.hot10 +
@@ -171,32 +175,36 @@ function balancePick(scoreObj) {
 
   pick = uniq(pick).slice(0, 6);
 
-  // 奇偶修正
   let odd = pick.filter(n => n % 2 === 1).length;
+
   if (odd === 0 || odd === 6) {
     for (const n of list) {
       for (let i = 0; i < pick.length; i++) {
         const test = [...pick];
         test[i] = n;
+
         const o = test.filter(x => x % 2 === 1).length;
+
         if (o >= 2 && o <= 4 && uniq(test).length === 6) {
           pick = test;
           odd = o;
           break;
         }
       }
+
       if (odd >= 2 && odd <= 4) break;
     }
   }
 
-  // 和值修正
-  let sum = pick.reduce((a,b)=>a+b,0);
+  let sum = pick.reduce((a, b) => a + b, 0);
+
   if (sum < 85 || sum > 160) {
     for (const n of list) {
-      for (let i=0;i<pick.length;i++) {
+      for (let i = 0; i < pick.length; i++) {
         const test = [...pick];
         test[i] = n;
-        const s = test.reduce((a,b)=>a+b,0);
+
+        const s = test.reduce((a, b) => a + b, 0);
 
         if (s >= 85 && s <= 160 && uniq(test).length === 6) {
           pick = test;
@@ -204,11 +212,12 @@ function balancePick(scoreObj) {
           break;
         }
       }
+
       if (sum >= 85 && sum <= 160) break;
     }
   }
 
-  return pick.sort((a,b)=>a-b);
+  return pick.sort((a, b) => a - b);
 }
 
 function blindTest(draws, weights) {
@@ -225,16 +234,22 @@ function blindTest(draws, weights) {
     const pick = balancePick(scoreObj);
 
     const hits = pick.filter(n => target.first.includes(n)).length;
+
     results.push(hits);
   }
 
   const total = results.length || 1;
-  const avg = results.reduce((a,b)=>a+b,0) / total;
+  const avg = results.reduce((a, b) => a + b, 0) / total;
 
   const rate = x =>
     Math.round(
       (results.filter(h => h >= x).length / total) * 100
     );
+
+  const distribution = {};
+  for (let i = 0; i <= 6; i++) {
+    distribution[i] = results.filter(x => x === i).length;
+  }
 
   return {
     total,
@@ -244,7 +259,8 @@ function blindTest(draws, weights) {
     hit3Rate: rate(3),
     hit4Rate: rate(4),
     hit5Rate: rate(5),
-    hit6Rate: rate(6)
+    hit6Rate: rate(6),
+    distribution
   };
 }
 
@@ -298,27 +314,32 @@ function analyze(draws) {
       number: pad(n),
       score: secondCount[n]
     }))
-    .sort((a,b)=>b.score-a.score)
-    .slice(0,4);
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4);
 
   return {
-    mode: "真 Optimizer 1000模型版",
+    mode: "Final Optimizer 1000模型版",
     latest: {
       first: latest.first.map(pad),
       second: pad(latest.second)
     },
     bestModel: best.test,
+    backtest: best.test,
     form: {
       numbers: finalNumbers.map(pad),
       oddEven:
-        `${finalNumbers.filter(n=>n%2===1).length}單` +
-        `${finalNumbers.filter(n=>n%2===0).length}雙`,
-      sum: finalNumbers.reduce((a,b)=>a+b,0),
-      low: finalNumbers.filter(n=>n<=12).length,
-      mid: finalNumbers.filter(n=>n>=13 && n<=25).length,
-      high: finalNumbers.filter(n=>n>=26).length
+        `${finalNumbers.filter(n => n % 2 === 1).length}單` +
+        `${finalNumbers.filter(n => n % 2 === 0).length}雙`,
+      sum: finalNumbers.reduce((a, b) => a + b, 0),
+      low: finalNumbers.filter(n => n <= 12).length,
+      mid: finalNumbers.filter(n => n >= 13 && n <= 25).length,
+      high: finalNumbers.filter(n => n >= 26).length
     },
     secondArea,
+    rules: {
+      testedModels: 1000,
+      bestWeights: best.weights
+    },
     note: "1000模型盲測淘汰版：優先最大化中3~6顆，但不保證未來中獎。"
   };
 }
@@ -351,10 +372,10 @@ app.get("/api/analyze", async (_, res) => {
 app.get("/health", (_, res) => {
   res.json({
     ok: true,
-    mode: "真 Optimizer 1000模型版"
+    mode: "Final Optimizer 1000模型版"
   });
 });
 
 app.listen(PORT, () => {
-  console.log(`Weili optimizer running on ${PORT}`);
+  console.log(`Weili final optimizer running on ${PORT}`);
 });
